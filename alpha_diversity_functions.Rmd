@@ -1,0 +1,160 @@
+---
+title: "script_alpha_diversity_functions"
+output: html_document
+date: "2025-05-12"
+---
+
+```{r}
+
+#loading the data
+counts <- read_excel("all13 no normalized NO transposed.xlsx")
+
+counts_t <- t(counts)
+
+str(counts_t)
+
+counts_df <- as.data.frame(counts, stringsAsFactors = FALSE)
+
+rownames(counts_df) <- counts_df[, 1]
+counts_df <- counts_df[, -1]  # Remove the KO column now in rownames
+
+counts_df[] <- lapply(counts_df, as.numeric)
+
+counts_t <- as.data.frame(t(counts_df))
+
+#then we normalize the data using the total number of reads after the assembly
+
+total_reads <- c(
+  "t0_water_winter" = 91080040,
+  "t1_water_winter" = 105155034,
+  "t2_water_winter" = 126922246,
+  "t3_water_winter" = 118719880,
+  "t0_water_summer" = 101551626,
+  "t1_water_summer" = 118387904,
+  "t2_water_summer" = 124541282,
+  "t3_water_summer" = 96596350,
+  "t1_rocks_winter" = 4360034,
+  "t2_rocks_winter" = 106865534,
+  "t3_rocks_winter" = 102643344,
+  "t1_rocks_summer" = 729672,
+  "t2_rocks_summer" = 13529884
+)
+
+normalized_counts <- sweep(counts_t, 1, total_reads, FUN = "/")
+
+data_shannon = diversity(normalized_counts, index = "shannon")
+
+data_evenness <- diversity(normalized_counts) / log(specnumber(normalized_counts)) 
+
+data_alphadiv <- cbind(ko_meta, data_shannon, data_evenness)
+
+
+data_alphadiv$season <- stringr::str_to_title(data_alphadiv$season)
+
+alpha_s <- ggplot(data_alphadiv, aes(x = season, y = data_shannon, fill = season)) + 
+  custom_theme() +
+  geom_boxplot(alpha = 0.3, width = 0.3, coef = 1.5, color = "black") +
+  geom_jitter(aes(color = season), size = 3, width = 0.1) +
+  scale_fill_manual(values = c("darkred","cornflowerblue")) + 
+  scale_color_manual(values = c("darkred","cornflowerblue"))  + 
+  labs(x = "Seasons", y = expression(paste("Shannon (", italic("H'"), ")"))) +  
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.2, color = "black") +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+
+alpha_s <- ggdraw(alpha_s) + 
+  draw_plot_label(label = "B)", x = 0.87, y = 1.01, size = 18, fontface = "bold")
+
+print(alpha_s)
+
+ggsave("alpha_s.png", plot = alpha_s, width = 10, height = 6, dpi = 300)
+
+```
+
+
+
+```{r}
+
+data_alphadiv$lifestyle <- stringr::str_to_title(data_alphadiv$lifestyle)
+
+alpha_l <- ggplot(data_alphadiv, aes(x = lifestyle, y = data_shannon, fill = lifestyle)) + 
+  custom_theme() +
+  geom_boxplot(alpha = 0.3, width = 0.3, coef = 1.5, color = "black") +
+  geom_jitter(aes(color = lifestyle), size = 3, width = 0.1) +
+  scale_fill_manual(values = c("cornflowerblue","darkgreen")) + 
+  scale_color_manual(values = c("cornflowerblue","darkgreen"))  + 
+  labs(x = "Lifestyle", y = expression(paste("Shannon (", italic("H'"), ")"))) +  
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.2, color = "black") +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+
+
+alpha_l <- ggdraw(alpha_l) + 
+  draw_plot_label(label = "A)", x = 0.87, y = 1.01, size = 18, fontface = "bold")
+
+print(alpha_l)
+
+ggsave("alpha_l.png", plot = alpha_l, width = 10, height = 6, dpi = 300)
+
+```
+
+
+#testing seasons
+
+```{r}
+valeur_shapiro = list()
+
+
+for (type in unique(data_alphadiv$season)) {
+  sample <- subset(data_alphadiv, season == type)
+  test_result <- shapiro.test(sample$data_shannon)
+  valeur_shapiro[[type]] <- test_result$p.value
+}
+
+
+print(valeur_shapiro)
+
+#the results here shows that summer and winter samples do not follow a normal distribution.
+
+#so we use wilcox test to compare the medians rather than means
+
+wilcox.test(data_shannon ~ season, data = data_alphadiv)
+
+
+
+
+
+
+```
+
+````{r}
+
+```{r}
+valeur_shapiro = list()
+
+
+for (type in unique(data_alphadiv$lifestyle)) {
+  sample <- subset(data_alphadiv, lifestyle == type)
+  test_result <- shapiro.test(sample$data_shannon)
+  valeur_shapiro[[type]] <- test_result$p.value
+}
+
+
+print(valeur_shapiro)
+
+#the results here shows that summer and winter samples do not follow a normal distribution.
+
+#so we use wilcox test to compare the medians rather than means
+
+wilcox.test(data_shannon ~ lifestyle, data = data_alphadiv)
+
+
+
+
+```
+
+
+
+
+
+
+
+

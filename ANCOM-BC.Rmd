@@ -1,0 +1,159 @@
+---
+title: "ANCOM-BC"
+output: html_document
+date: "2025-05-08"
+---
+
+```{r}
+library(phyloseq)
+library(ANCOMBC)
+library(tidyverse)
+library(DT)
+
+#custom theme
+custom_theme <- function(){ 
+  theme_classic() %+replace% 
+    theme(
+      plot.title = element_text(size = text_size),
+      plot.subtitle = element_text(size = text_size),
+      plot.caption = element_text(size = text_size),
+      axis.title = element_text(size = text_size),
+      axis.text = element_text(size = text_size),
+      axis.text.x = element_text(size = text_size),
+      axis.text.y = element_text(size = text_size),
+      legend.text = element_text(size = text_size),
+      legend.title = element_text(size = text_size, hjust = 0),
+      strip.text = element_text(size = text_size),
+      strip.background = element_blank(),
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+      panel.grid.major = element_blank(),  # REMOVE major grid lines
+      panel.grid.minor = element_blank()   # REMOVE minor grid lines
+    )
+}
+
+```
+
+
+```{r}
+ps = phyloseq(otu_table(asv_rarified, taxa_are_rows=TRUE), tax_table(as.matrix(taxa_rarified)), sample_data(meta_rarifed))
+
+# Subset to Genus level (if not already done)
+ps_genus <- tax_glom(ps, taxrank = "Genus")
+
+# Check and clean factor levels
+sample_data(ps_genus)$season <- factor(sample_data(ps_genus)$season, 
+                                       levels = c("winter", "summer"))
+
+ancombc_out <- ancombc(data = ps_genus,
+                       tax_level = "Genus",
+                       formula = "season",
+                       p_adj_method = "holm",
+                       prv_cut = 0.10,
+                       lib_cut = 1000,
+                       group = "season",
+                       struc_zero = TRUE,
+                       neg_lb = TRUE,
+                       tol = 1e-5,
+                       max_iter = 100,
+                       conserve = TRUE,
+                       alpha = 0.05,
+                       global = TRUE,
+                       n_cl = 1,
+                       verbose = TRUE)
+
+
+res_ancom <- ancombc_out$res
+
+
+
+str(ancombc_out)
+
+res <- ancombc_out$res
+
+res_global = ancombc_out$res_global
+
+res_df <- data.frame(
+  taxon = res$lfc$taxon,
+  lfc = res$lfc$seasonsummer,            # Log fold change for summer
+  se = res$se$seasonsummer,              # Standard error for summer
+  W = res$W$seasonsummer,                # W statistic for summer
+  p_val = res$p_val$seasonsummer,        # p-value for summer
+  q_val = res$q_val$seasonsummer,        # q-value (adjusted p-value) for summer
+  diff_abn = res$diff_abn$seasonsummer  # Differential abundance (TRUE/FALSE)
+)
+
+colnames(res_df) <- c("Taxon", 
+                      "Log_Fold_Change", 
+                      "Standard_Error", 
+                      "W_Statistic", 
+                      "P_Value", 
+                      "Ajusted_p_value", 
+                      "Differential_Abundance")
+
+sig_res_df <- res_df[res_df$Differential_Abundance == TRUE, ]
+
+sig_res_df$Season_Association <- ifelse(sig_res_df$Log_Fold_Change > 0, "Summer", "Winter")
+
+summary(res_df$Standard_Error)
+
+format_taxon_names <- function(taxon) {
+  taxon <- gsub("_", " ", taxon) # Replace underscores with spaces
+  # Ensure "unclassified" is not italicized
+  taxon <- ifelse(taxon == "unclassified", taxon, paste0("*", taxon, "*"))
+  return(taxon)
+}
+
+ancom <- ggplot(sig_res_df, aes(x = Log_Fold_Change, y = Taxon, fill = Season_Association)) + 
+  geom_bar(stat = "identity", width = 0.4, color = "black", size = 0.4, alpha = 0.5) +
+  # Add error bars:
+  geom_errorbarh(aes(xmin = Log_Fold_Change - Standard_Error,
+                     xmax = Log_Fold_Change + Standard_Error),
+                 height = 0.2, color = "black", linewidth = 0.3) +
+  custom_theme() +
+  facet_grid(rows = vars(Season_Association), scales = "free_y", space = "free_y") +
+  theme(
+    legend.position = "none",
+    strip.text.y = element_text(angle = 0, size = 10),
+    axis.text.y = element_markdown(size = 8),    # Use element_markdown to interpret Markdown (italics) in the axis labels
+    axis.text.x = element_text(size = 8),  
+    axis.title.x = element_text(size = 10),
+    axis.title.y = element_text(size = 10)   
+  ) +
+  scale_x_continuous(limits = c(-5, 5), expand = c(0, 0)) +
+  labs(x = "Log Fold Change (LFC)", y = "Taxon (Genus)") + 
+  scale_fill_manual(values = c("darkred", "cornflowerblue")) +
+  geom_vline(xintercept = 0, linewidth = 0.25, colour = "black") +
+  scale_y_discrete(labels = function(x) sapply(x, format_taxon_names))
+
+ggsave("ancom.png", plot = ancom, width = 10, height = 6, dpi = 300)
+
+
+
+
+
+
+```
+
+
+```{r}
+
+samp_frac = ancombc_out$samp_frac
+# Replace NA with 0
+samp_frac[is.na(samp_frac)] = 0 
+# Add pesudo-count (1) to avoid taking the log of 0
+log_obs_abn = log(ancombc_out$feature_table + 1)
+# Adjust the log observed abundances
+log_corr_abn = t(t(log_obs_abn) - samp_frac)
+# Show the first 6 samples
+round(log_corr_abn[, 1:6], 2) %>% 
+  datatable(caption = "Bias-corrected log observed abundances")
+
+
+```
+
+
+
+
+
+
+
