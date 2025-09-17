@@ -1,0 +1,222 @@
+---
+title: "db-RDA functions"
+output: html_document
+date: "2025-08-29"
+---
+
+```{r}
+library(vegan)
+library(ggplot2)
+````
+
+
+```{r}
+
+dbrda_meta <- read_excel("meta_KO.xlsx")
+
+dbrda_meta <- column_to_rownames(dbrda_meta, var = names(dbrda_meta) [1])
+
+dbrda_meta
+
+counts <- read_excel("all13 no normalized NO transposed.xlsx")
+
+counts_t <- t(counts)
+
+str(counts_t)
+
+counts_df <- as.data.frame(counts, stringsAsFactors = FALSE)
+
+rownames(counts_df) <- counts_df[, 1]
+counts_df <- counts_df[, -1]  # Remove the KO column now in rownames
+
+counts_df[] <- lapply(counts_df, as.numeric)
+
+counts_t <- as.data.frame(t(counts_df))
+
+#then we normalize the data using the total number of reads after the assembly
+
+total_reads <- c(
+  "t0_water_winter" = 91080040,
+  "t1_water_winter" = 105155034,
+  "t2_water_winter" = 126922246,
+  "t3_water_winter" = 118719880,
+  "t0_water_summer" = 101551626,
+  "t1_water_summer" = 118387904,
+  "t2_water_summer" = 124541282,
+  "t3_water_summer" = 96596350,
+  "t1_rocks_winter" = 4360034,
+  "t2_rocks_winter" = 106865534,
+  "t3_rocks_winter" = 102643344,
+  "t1_rocks_summer" = 729672,
+  "t2_rocks_summer" = 13529884
+)
+
+normalized_counts <- sweep(counts_t, 1, total_reads, FUN = "/")
+
+dbrda_meta <- dbrda_meta[rownames(dbrda_meta) != "t3-rocks-summer", ]
+
+dbrda_env <- dbrda_meta[, sapply(dbrda_meta, is.numeric)]
+
+
+#standarize the values because I hava different units ON PHYSICAL CHEMICAL DATA
+
+metadata_standarized <- decostand(dbrda_env, method = "standardize")
+
+#calculate the hellinger distance
+functions_hellinger = decostand(normalized_counts, method = "hellinger")
+
+#Compute Bray-Curtis distance
+
+dist_matrix <- vegdist(functions_hellinger, method = "bray")
+
+#Run db-RDA
+
+dbRDA <- capscale(dist_matrix ~ pH + DO + DIC + DOC + NO2 + NHx,
+                  data = metadata_standarized, distance = "bray")
+
+
+summary(dbRDA)
+
+
+# Global test
+anova_global <- anova.cca(dbRDA, permutations = 9999)
+
+print(anova_global)
+
+# Test for each environmental variable
+anova_terms <- anova(dbRDA, by = "terms", permutations = 999)
+print(anova_terms)
+
+# Extract site and variable scores
+
+site_scores_df <- as.data.frame(scores(dbRDA, display = "sites"))
+variable_scores_df <- as.data.frame(scores(dbRDA, display = "bp"))
+
+# Merge site scores with metadata for plotting
+plot_data <- cbind(site_scores_df, metadata_standarized)
+
+# Extract significant variables (p < 0.05)
+
+anova_df <- as.data.frame(anova_terms)
+anova_df$Variable <- rownames(anova_df)
+significant_vars <- anova_df$Variable[anova_df$`Pr(>F)` < 0.05]
+
+# Keep only significant variables for arrows
+variable_scores_df <- variable_scores_df[rownames(variable_scores_df) %in% significant_vars, ]
+
+
+#Prepare variance explained for axes
+
+eigenvals <- eigenvals(dbRDA)
+var_explained <- eigenvals / sum(eigenvals) * 100
+dim_names <- colnames(site_scores_df)
+
+print(var_explained)
+
+# Test each canonical axis
+anova_axes <- anova.cca(dbRDA, by = "axis", permutations = 999)
+print(anova_axes)
+
+
+230# Adjust arrow labels for significant variables
+
+# Default positions
+variable_scores_df$label_hjust <- 0.5
+variable_scores_df$label_vjust <- -1
+
+# Adjust for significant variables
+if("DIC" %in% rownames(variable_scores_df)){
+  variable_scores_df$label_hjust[rownames(variable_scores_df) == "DIC"] <- 1.3
+  variable_scores_df$label_vjust[rownames(variable_scores_df) == "DIC"] <- 1
+}
+
+if("DOC" %in% rownames(variable_scores_df)){
+  variable_scores_df$label_hjust[rownames(variable_scores_df) == "DOC"] <- 0.8
+  variable_scores_df$label_vjust[rownames(variable_scores_df) == "DOC"] <- 1.5
+}
+
+if("NO2" %in% rownames(variable_scores_df)){
+  variable_scores_df$label_hjust[rownames(variable_scores_df) == "NO2"] <- 0.9
+  variable_scores_df$label_vjust[rownames(variable_scores_df) == "NO2"] <- -0.5
+}
+
+if("NHx" %in% rownames(variable_scores_df)){
+  variable_scores_df$label_hjust[rownames(variable_scores_df) == "NHx"] <- 1.2
+  variable_scores_df$label_vjust[rownames(variable_scores_df) == "NHx"] <- -0.5
+}
+
+
+
+
+# Merge with metadata (ensure rownames match)
+rownames(dbrda_meta) <- gsub("-", "_", rownames(dbrda_meta))
+
+plot_dbrda <- cbind(plot_data, dbrda_meta[rownames(plot_data), , drop = FALSE])
+
+str(plot_dbrda)
+
+cols_to_drop <- c("pH.1", "DO.1", "DIC.1", "DOC.1", "NO2.1", "NHx.1")
+
+# Drop these columns if they exist
+plot_dbrda <- plot_dbrda[, !(names(plot_dbrda) %in% cols_to_drop)]
+
+# Fix capitalization for seasons (if used)
+plot_dbrda$lifestyle <- stringr::str_to_title(plot_dbrda$lifestyle)
+
+
+
+````
+
+
+```{r}
+
+#ploting
+
+dbrda.f <- ggplot() +
+  # Axes
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray") +
+
+  # Site points
+  geom_point(data = plot_dbrda,
+             aes(x = CAP1, y = CAP2, fill = factor(lifestyle)),
+             shape = 21, color = "black", size = 3, stroke = 0.6, alpha = 1) +
+  
+  # Significant vectors (already filtered)
+  geom_segment(data = variable_scores_df,
+               aes(x = 0, y = 0, xend = CAP1, yend = CAP2),
+               arrow = arrow(length = unit(0.1, "cm")),
+               color = "black") +
+  
+  
+
+  # Vector labels
+  geom_text(data = variable_scores_df,
+            aes(x = CAP1, y = CAP2, label = rownames(variable_scores_df),
+                hjust = label_hjust, vjust = label_vjust),
+            color = "black", size = 3) +
+
+  # Axis labels
+  xlab(paste("dbRDA (", round(var_explained[1], 2), "%)", sep = "")) +
+  ylab(paste("dbRDA (", round(var_explained[2], 2), "%)", sep = "")) +
+
+  # Colors
+  scale_fill_manual(values = c("cornflowerblue", "darkgreen")) +
+  labs(fill = "Lifestyle") +
+
+  # Theme and axis limits
+  custom_theme() +
+  scale_x_continuous(limits = c(-2.1, 2.1), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(-1.8, 1.8), expand = c(0, 0)) +
+  coord_fixed(ratio = 1)
+
+ggsave(filename = "dbrda.f.svg", plot = dbrda.f, device = "svg",  width = 6.44, height = 4.36, units = "in", dpi = 300)
+
+
+````
+
+
+
+
+
+

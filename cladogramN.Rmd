@@ -1,0 +1,700 @@
+---
+title: "Cladogram_lefse"
+output: html_document
+date: "2025-06-04"
+---
+
+
+
+```{r}
+library(RColorBrewer)
+library(randomcoloR)
+library(data.tree)
+library(igraph) 
+library(ggtree)
+library(ggplot2)
+library(ape)
+library(scales)
+library(igraph)
+library(dplyr)
+library(ggraph)
+library(tidygraph)
+library(gridExtra)
+library(ggforce)
+library(tibble)
+library(stringr)
+
+
+library(ggnewscale)
+
+```
+
+
+making the list first
+```{r}
+
+planktonic_paths <- c(
+  "Aminoacyl-tRNA biosynthesis",
+  "Pyrimidine metabolism",
+  "Purine metabolism",
+  "Carbon fixation by Calvin cycle",
+  "Fructose and mannose metabolism",
+  "DNA replication",
+  "Cell cycle - Caulobacter",
+  "Pentose phosphate pathway",
+  "Base excision repair",
+  "Pantothenate and CoA biosynthesis",
+  "Arginine biosynthesis",
+  "Biosynthesis of ansamycins",
+  "MAPK signaling pathway - plant",
+  "Protein processing in endoplasmic reticulum",
+  "N-Glycan biosynthesis",
+  "Longevity regulating pathway",
+  "Plant hormone signal transduction",
+  "MAPK signaling pathway - fly",
+  "Coronavirus disease - COVID-19",
+  "Biosynthesis of various antibiotics; Kanosamine biosynthesis, Aurachin biosynthesis, Bacilysin biosynthesis, Puromycin biosynthesis, Dapdiamides biosynthesis, Fosfomycin biosynthesis, Cremeomycin biosynthesis, Fumagillin biosynthesis, Pentalenolactone biosynthesis, Terpentecin biosynthesis, Roseoflavin biosynthesis, Cycloserine biosynthesis",
+  "Prolactin signaling pathway",
+  "Selenocompound metabolism",
+  "FoxO signaling pathway",
+  "African trypanosomiasis",
+  "Lipoarabinomannan (LAM) biosynthesis",
+  "Autophagy - yeast"
+)
+
+sessile_paths <- c(
+  "Benzoate degradation",
+  "Steroid degradation",
+  "Nitrogen metabolism",
+  "Toluene degradation",
+  "Xylene degradation",
+  "Chlorocyclohexane and chlorobenzene degradation",
+  "Pathways in cancer",
+  "Prion disease",
+  "Non-alcoholic fatty liver disease",
+  "Amyotrophic lateral sclerosis",
+  "Pathways of neurodegeneration - multiple diseases",
+  "Thermogenesis",
+  "Huntington disease",
+  "Cardiac muscle contraction",
+  "Dioxin degradation",
+  "Adipocytokine signaling pathway",
+  "Efferocytosis",
+  "Shigellosis",
+  "Ferroptosis",
+  "Axon regeneration"
+)
+
+
+intersect(planktonic_paths, sessile_paths)
+
+```
+
+
+```{r}
+
+
+# Step 1: Initialize the KEGG tree
+kegg_tree <- Node$new("KEGG")
+
+
+kegg_classification_subcat <- list(
+  Planktonic = list(
+    Metabolism = list(
+      `Carbohydrate metabolism` = c(
+        "Pentose phosphate pathway",
+        "Fructose and mannose metabolism"
+      ),
+      `Energy metabolism` = c(
+        "Carbon fixation by Calvin cycle"
+      ),
+      `Nucleotide metabolism` = c(
+        "Pyrimidine metabolism",
+        "Purine metabolism"
+      ),
+      `Amino acid metabolism` = c(
+        "Arginine biosynthesis"
+      ),
+      `Metabolism of other amino acids` = c(
+        "Selenocompound metabolism"
+      ),
+      `Glycan biosynthesis and metabolism` = c(
+        "N-Glycan biosynthesis",
+        "Lipoarabinomannan (LAM) biosynthesis"
+      ),
+      `Metabolism of cofactors and vitamins` = c(
+        "Pantothenate and CoA biosynthesis"
+      ),
+      `Metabolism of terpenoids and polyketides` = c(
+        "Biosynthesis of ansamycins"
+      ),
+      `Biosynthesis of other secondary metabolites` = c(
+        "Biosynthesis of various antibiotics; Kanosamine biosynthesis, Aurachin biosynthesis, Bacilysin biosynthesis, Puromycin biosynthesis, Dapdiamides biosynthesis, Fosfomycin biosynthesis, Cremeomycin biosynthesis, Fumagillin biosynthesis, Pentalenolactone biosynthesis, Terpentecin biosynthesis, Roseoflavin biosynthesis, Cycloserine biosynthesis"
+      )
+    ),
+    Genetic_Information_Processing = list(
+      Translation = c(
+        "Aminoacyl-tRNA biosynthesis"
+      ),
+      `Folding, sorting and degradation` = c(
+        "Protein processing in endoplasmic reticulum"
+      ),
+      `Replication and repair` = c(
+        "DNA replication",
+        "Base excision repair"
+      )
+    ),
+    Environmental_Information_Processing = list(
+      `Signal transduction` = c(
+        "MAPK signaling pathway - plant",
+        "MAPK signaling pathway - fly",
+        "FoxO signaling pathway",
+        "Plant hormone signal transduction"
+      )
+    ),
+    Organismal_Systems = list(
+      `Aging` = c(
+        "Longevity regulating pathway"
+      ),
+      `Endocrine system` = c(
+        "Prolactin signaling pathway"
+      )
+    ),
+    Cellular_Processes = list(
+      `Cell growth and death` = c(
+        "Cell cycle - Caulobacter"
+      ),
+      `Transport and catabolism` = c(
+        "Autophagy - yeast"
+      )
+    ),
+    Human_Diseases = list(
+      `Infectious disease: viral` = c(
+        "Coronavirus disease - COVID-19"
+      ),
+      `Infectious disease: parasitic` = c(
+        "African trypanosomiasis"
+      )
+    )
+  ),
+  Sessile = list(
+    Metabolism = list(
+      `Xenobiotics biodegradation and metabolism` = c(
+        "Benzoate degradation",
+        "Steroid degradation",
+        "Xylene degradation",
+        "Toluene degradation",
+        "Dioxin degradation",
+        "Chlorocyclohexane and chlorobenzene degradation"
+      ),
+      `Energy metabolism` = c(
+        "Nitrogen metabolism"
+      )
+    ),
+    Human_Diseases = list(
+      `Cancer: overview` = c(
+        "Pathways in cancer"
+      ),
+      `Neurodegenerative disease` = c(
+        "Prion disease",
+        "Huntington disease",
+        "Amyotrophic lateral sclerosis",
+        "Pathways of neurodegeneration - multiple diseases"
+      ),
+      `Endocrine and metabolic disease` = c(
+        "Non-alcoholic fatty liver disease"
+      ),
+      `Infectious disease: bacterial` = c(
+        "Shigellosis"
+      )
+    ),
+    Organismal_Systems = list(
+      `Environmental adaptation` = c(
+        "Thermogenesis"
+      ),
+      `Circulatory system` = c(
+        "Cardiac muscle contraction"
+      ),
+      `Endocrine system` = c(
+        "Adipocytokine signaling pathway"
+      ),
+      `Development and regeneration` = c(
+        "Axon regeneration"
+      )
+    ),
+    Cellular_Processes = list(
+      `Transport and catabolism` = c(
+        "Efferocytosis"
+      ),
+      `Cell growth and death` = c(
+        "Ferroptosis"
+      )
+    ),
+    Environmental_Information_Processing = list()
+  )
+)
+
+
+
+```
+
+```{r}
+
+#Flatten your nested list into a data.frame
+
+flatten_paths <- function(classification, lifestyle_label) {
+  paths <- list()
+  
+  for (lvl1 in names(classification)) {
+    lvl1_item <- classification[[lvl1]]
+    
+    if (is.list(lvl1_item)) {
+      for (lvl2 in names(lvl1_item)) {
+        lvl3_vec <- lvl1_item[[lvl2]]
+        if (length(lvl3_vec) > 0) {
+          temp <- tibble::tibble(
+            Level1 = lvl1,
+            Level2 = lvl2,
+            Level3 = lvl3_vec,
+            lifestyle = lifestyle_label
+          )
+          paths <- append(paths, list(temp))
+        }
+      }
+    } else if (is.character(lvl1_item)) {
+      # Handle flat structure
+      temp <- tibble::tibble(
+        Level1 = lvl1,
+        Level2 = NA,
+        Level3 = lvl1_item,
+        lifestyle = lifestyle_label
+      )
+      paths <- append(paths, list(temp))
+    }
+  }
+  
+  dplyr::bind_rows(paths)
+}
+
+
+
+planktonic_df <- flatten_paths(kegg_classification_subcat$Planktonic, "Planktonic")
+planktonic_df <- planktonic_df[-c(41, 42, 43, 44), ]
+
+
+sessile_df <- flatten_paths(kegg_classification_subcat$Sessile, "Sessile")
+
+
+
+
+
+full_df <- bind_rows(planktonic_df, sessile_df)
+
+
+
+```
+
+
+```{r}
+
+anyDuplicated(full_df$Level3)
+
+any(grepl("[,;()]", full_df$Level3))
+
+full_df$Level3 <- gsub("[,;()]", "", full_df$Level3)
+full_df$Level2 <- gsub("[,;()]", "", full_df$Level2)
+
+any(grepl("[,;()]", full_df$Level2))
+any(grepl("[,;()]", full_df$Level1))
+
+
+full_df$pathString <- paste("KEGG", full_df$Level1, full_df$Level2, full_df$Level3, sep = "/")
+
+kegg_tree <- data.tree::as.Node(full_df, pathName = "pathString")
+
+kegg_tree$Do(function(node) {
+  if (node$isLeaf) {
+    match_row <- full_df[full_df$Level3 == node$name, ]
+    if (nrow(match_row) > 0) {
+      node$lifestyle <- unique(match_row$lifestyle)
+    }
+  }
+})
+
+
+
+kegg_phylo <- as.phylo.Node(kegg_tree)
+
+str(kegg_phylo)
+plot(kegg_phylo, cex=0.6, no.margin=TRUE)
+
+plot(kegg_phylo, type = "fan", cex = 0.6, no.margin = TRUE)
+
+tip_df <- data.frame(label = kegg_phylo$tip.label) %>%
+  mutate(label_clean = gsub("_", " ", label))
+
+full_df <- full_df %>%
+  mutate(Level3_clean = gsub("[_]", " ", Level3))
+
+tip_df <- tip_df %>%
+  left_join(full_df %>% select(Level3_clean, lifestyle) %>% distinct(),
+            by = c("label_clean" = "Level3_clean"))
+
+str(tip_df)
+
+head(kegg_phylo$tip.label)
+head(full_df$Level3)
+
+full_df <- full_df %>%
+  mutate(Level3_clean = str_trim(Level3) %>% str_replace_all("_", " ") %>% tolower())
+
+tip_labels_df <- data.frame(label = kegg_phylo$tip.label) %>%
+  mutate(label_clean = str_trim(label) %>% str_replace_all("_", " ") %>% tolower())
+
+tip_df <- tip_labels_df %>%
+  left_join(full_df %>% select(Level3_clean, lifestyle) %>% distinct(), 
+            by = c("label_clean" = "Level3_clean")) %>%
+  select(label, lifestyle)
+
+tip_df <- tip_df %>%
+  left_join(full_df %>% select(Level3, Level2) %>% distinct(), 
+            by = c("label_clean" = "Level3"))
+
+tip_df <- tip_df %>%
+  select(-label)
+
+
+
+str(tip_df)
+
+names(tip_df)
+
+tip_df <- tip_df %>%
+  mutate(label_clean = str_replace_all(label, "[,;()]", ""),
+         label_clean = str_replace_all(label_clean, " ", "_"))
+
+full_df <- full_df %>%
+  mutate(Level3_clean = str_replace_all(Level3, "[,;()]", ""),
+         Level3_clean = str_replace_all(Level3_clean, " ", "_"))
+
+tip_df <- tip_df %>%
+  left_join(full_df %>% select(Level3_clean, Level2), by = c("label_clean" = "Level3_clean"))
+
+str(tip_df)
+
+tip_df <- tip_df %>%
+  rename(Level2 = `Level2.y `) %>%
+  select(-`Level2.x`, -label_clean)
+
+grouped_tips <- tip_df %>%
+  filter(!is.na(Level2)) %>%
+  group_by(Level2) %>%
+  summarise(tips = list(label_clean))
+
+
+
+level2_colors <- setNames(
+  grDevices::rainbow(nrow(grouped_tips)),
+  grouped_tips$Level2
+)
+
+p <- ggtree(kegg_phylo, layout = "circular")
+
+for (i in seq_len(nrow(grouped_tips))) {
+  p <- p + geom_hilight(
+    node = MRCA(kegg_phylo, grouped_tips$tips[[i]]),
+    fill = level2_colors[i],
+    alpha = 0.3
+  )
+}
+
+print(p)
+
+
+grouped_tips <- tip_df %>%
+  filter(!is.na(Level2)) %>%
+  group_by(Level2) %>%
+  summarise(tips = list(label), .groups = "drop")
+
+level2_colors <- setNames(
+  RColorBrewer::brewer.pal(n = nrow(grouped_tips), name = "Set3"),
+  grouped_tips$Level2
+)
+
+
+
+
+
+
+grouped_tips <- tip_df %>%
+  filter(!is.na(Level2)) %>%
+  group_by(Level2) %>%
+  summarise(tips = list(label), .groups = "drop")
+
+
+n_groups <- nrow(grouped_tips) 
+
+
+level2_colors <- setNames(
+  colorRampPalette(brewer.pal(12, "Set3"))(n_groups),
+  grouped_tips$Level2
+)
+
+kegg_tree_data <- ggtree(kegg_phylo, layout = "circular") %<+% tip_df
+
+p <- kegg_tree_data +
+  geom_tree(size = 0.2) +
+  geom_tippoint(aes(color = lifestyle), size = 2) +
+  scale_color_manual(values = c("Sessile" = "darkgreen", "Planktonic" = "blue", "Other" = "gray")) +
+  theme(legend.position = "right")
+
+# Add colored outer ring segments (highlight by Level2)
+tip_segments <- p$data %>%
+  filter(isTip) %>%
+  select(label, x, y, branch, Level2)
+
+p + 
+  geom_segment(
+    data = tip_segments,
+    aes(x = x - 0.05, xend = x, y = y, yend = y, color = Level2),
+    size = 2
+  ) +
+  scale_color_manual(values = level2_colors) +
+  guides(color = guide_legend(title = "Level 2 Category"))
+
+print(p)
+
+p + 
+  geom_segment(
+    data = tip_segments,
+    aes(x = x - 0.05, xend = x, y = y, yend = y, color = Level2),
+    size = 2
+  ) +
+  scale_color_manual(values = level2_colors) +
+  guides(color = guide_legend(
+    title = "Level 2 Category",
+    override.aes = list(size = 3),     # Size of legend points
+    title.theme = element_text(size = 9),   # Smaller title
+    label.theme = element_text(size = 8),   # Smaller labels
+    keyheight = unit(0.4, "cm"),            # Height of each legend item
+    keywidth = unit(0.4, "cm")              # Width of each legend item
+  )) +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9),
+    legend.key.size = unit(0.4, "cm"),
+    legend.spacing.y = unit(0.3, "cm")
+  )
+
+
+
+edge_background <- p$data %>%
+  filter(isTip) %>%
+  select(label, x, y, branch, Level2) %>%
+  mutate(
+    x_start = x - 0.15,  # Start before edge
+    x_end = x + 0.05     # Extend beyond tip
+  )
+
+
+
+print(p)
+
+
+
+
+```
+
+```{r}
+
+
+
+level1_nodes <- p$data %>% 
+  filter(label %in% unique(full_df$Level1))
+
+root_x <- min(level1_nodes$x, na.rm = TRUE)
+
+tip_info <- p$data %>%
+  filter(isTip) %>%
+  select(label, x, y) %>%
+  left_join(tip_df, by = "label")
+
+level2_bands <- tip_info %>%
+  group_by(Level2) %>%
+  summarise(
+    ymin = min(y),
+    ymax = max(y),
+    x_start = root_x - 0.04,
+    x_end = max(x),
+    .groups = "drop"
+  )
+
+
+
+level2_bands <- level2_bands %>%
+  mutate(
+    band_height = ymax - ymin,
+    ymin = ifelse(band_height == 0, ymin - 0.6, ymin),
+    ymax = ifelse(band_height == 0, ymax + 0.6, ymax)
+  ) %>%
+  select(-band_height)
+
+# Assign a letter per unique Level2 pathway
+level2_letters <- data.frame(
+  Level2 = sort(unique(full_df$Level2)),
+  Letter = LETTERS[1:length(unique(full_df$Level2))]
+)
+
+str(level2_letters)
+
+str(tip_info)
+
+# Merge letters into tip_info
+tip_info <- tip_info %>%
+  select(-starts_with("Letter")) %>%  # remove any old Letter columns
+  left_join(level2_letters, by = "Level2")
+
+
+str(tip_info)
+
+# Dummy data to trigger legend
+letter_legend_df <- level2_letters %>%
+  mutate(x = NA, y = NA)  # dummy coordinates
+
+
+label_positions <- tip_info %>%
+  group_by(Level2) %>%
+  arrange(y) %>%
+  slice(ceiling(n() / 2)) %>%
+  ungroup()
+
+level2_legend_df <- level2_letters %>%
+  mutate(
+    LetterLabel = paste0(Letter, ": ", Level2),
+    x = 0,   # dummy coordinate
+    y = 0
+  )
+
+
+````
+
+
+
+
+
+```{r}
+
+#workssss
+tip_info <- kegg_tree_data$data %>%
+  filter(isTip) %>%
+  select(label, x, y) %>%
+  left_join(full_df %>% select(Level3_clean, Level2, lifestyle), 
+            by = c("label" = "Level3_clean"))
+
+level2_letters <- tibble(
+  Level2 = sort(unique(tip_info$Level2)),
+  Letter = LETTERS[1:length(unique(tip_info$Level2))]
+)
+
+tip_info <- tip_info %>%
+  left_join(level2_letters, by = "Level2")
+
+label_positions <- tip_info %>%
+  group_by(Level2, Letter) %>%
+  summarize(
+    x = max(x) + 0.1,  # put label just outside the tips on x-axis
+    y = mean(y),       # vertical midpoint
+    .groups = "drop"
+  )
+
+
+
+````
+
+
+
+
+```{r}
+
+level2_colors <- setNames(
+  colorRampPalette(brewer.pal(12, "Set3"))(n_groups),
+  grouped_tips$Level2
+)
+
+# Create named vector of labels with letters inside parentheses
+new_level2_labels <- paste0(names(level2_colors), " (", LETTERS[1:length(level2_colors)], ")")
+
+names(new_level2_labels) <- names(level2_colors)
+
+p <- kegg_tree_data +
+  geom_tree(size = 0.2) +
+
+  # Background rectangles
+  geom_rect(
+    data = level2_bands,
+    aes(xmin = x_start, xmax = x_end, ymin = ymin, ymax = ymax, fill = Level2),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    show.legend = FALSE
+  ) +
+  scale_fill_manual(values = level2_colors) +  # background fill colors
+
+  # Tip points by lifestyle
+  geom_tippoint(aes(color = lifestyle), size = 5, show.legend = TRUE) +
+  scale_color_manual(
+    name = "Lifestyle",
+    values = c("Sessile" = "darkgreen", "Planktonic" = "cornflowerblue", "Other" = "gray"),
+    guide = guide_legend(override.aes = list(shape = 16, size = 4))
+  ) +
+
+  # Add letters near tips
+  geom_text(
+    data = label_positions,
+    aes(x = x + 0.02, y = y, label = Letter),
+    size = 3,
+    fontface = "bold",
+    inherit.aes = FALSE
+  ) +
+
+  # Add legend for Level 2 Pathways with letters in labels (not inside squares)
+  geom_point(
+    data = level2_legend_df,
+    aes(x = x, y = y, fill = Level2Label),
+    shape = 21,
+    size = 5,
+    inherit.aes = FALSE,
+    show.legend = TRUE
+  ) +
+  scale_fill_manual(
+    name = "Level 2 Pathway",
+    values = level2_colors,
+    labels = new_level2_labels,
+    guide = guide_legend(override.aes = list(shape = 22, size = 5))
+  ) +
+
+  guides(
+    fill = guide_legend(order = 2),
+    color = guide_legend(order = 1)
+  ) +
+
+  theme(
+    legend.position = "right",
+    legend.text = element_text(size = 9),
+    legend.title = element_text(face = "bold", size = 12)
+  )
+
+print(p)
+
+ggsave(filename = "cladogram.svg", plot = p, device="svg", width = 16.40, height = 10.28, units = "in", dpi = 300)
+
+````
+
+
+
+
+
+
+
+
+

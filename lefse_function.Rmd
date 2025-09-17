@@ -1,0 +1,288 @@
+---
+title: "lefse_function"
+output: html_document
+date: "2025-03-24"
+---
+
+````{r}
+
+library(readxl)
+library(readr)
+library(phyloseq)
+library(lefser)
+
+library(microbiomeMarker)
+````
+
+
+
+```{r}
+#load the data
+ko_asv <- read_excel("all13 no normalized NO transposed.xlsx")
+
+
+ko_asv <- column_to_rownames(ko_asv, var = names(ko_asv)[1])
+
+all(colnames(ko_asv) %in% names(total_reads)) 
+
+total_reads <- c(
+  "t0_water_winter" = 91080040,
+  "t1_water_winter" = 105155034,
+  "t2_water_winter" = 126922246,
+  "t3_water_winter" = 118719880,
+  "t0_water_summer" = 101551626,
+  "t1_water_summer" = 118387904,
+  "t2_water_summer" = 124541282,
+  "t3_water_summer" = 96596350,
+  "t1_rocks_winter" = 4360034,
+  "t2_rocks_winter" = 106865534,
+  "t3_rocks_winter" = 102643344,
+  "t1_rocks_summer" = 729672,
+  "t2_rocks_summer" = 13529884
+)
+
+#normalize the data
+ko_asv_normalized <- sweep(ko_asv, 2, total_reads[colnames(ko_asv)], FUN = "/")
+
+#load the pathway info
+ko_taxa <- read_tsv("kegg_pathways.tsv")
+
+ko_taxa <- ko_taxa[, 1:7]
+
+str(ko_taxa)
+colnames(ko_taxa) <- c(
+  "Kingdom",    # Original: CATEGORY (e.g., "BIOSYNTHESIS")
+  "Phylum",     # Original: HEADER (e.g., "AMINO ACIDS")
+  "Class",      # Original: SUBHEADER (e.g., "ALANINE, ASPARTATE, GLUTAMATE")
+  "Order",      # Original: COMMENT1 (if needed)
+  "Family",     # Add more if required (or leave NA)
+  "Genus",      # (Optional)
+  "Species"     # (Optional)
+)
+
+
+
+ko_taxa <- column_to_rownames(ko_taxa, var = names(ko_taxa)[1])
+
+ko_taxa <- ko_taxa [, 1:7]
+
+
+ko_meta <- read_excel("meta_KO.xlsx")
+
+ko_meta[[1]]
+
+ko_meta[[1]] <- gsub("-", "_", ko_meta[[1]])
+
+ko_meta <- column_to_rownames(ko_meta, var = names(ko_meta) [1])
+
+ko_meta <- ko_meta[rownames(ko_meta) != "t3_rocks_summer", ]
+ko_meta <- ko_meta[rownames(ko_meta) != "t1_rocks_summer", ]
+
+#delete the t1_rocks_summer column
+ko_asv_normalized <- ko_asv_normalized[, colnames(ko_asv_normalized) != "t1_rocks_summer"]
+
+str(ko_asv_normalized)
+str(ko_taxa)
+str(ko_meta)
+
+ko_asv_normalized$KO <- rownames(ko_asv_normalized)
+
+ko_taxa$KO <- rownames(ko_taxa)
+
+colnames(ko_taxa)[1] <- "KO"
+
+
+
+#merge the data
+
+ko_annotated <- inner_join(ko_taxa, ko_asv_normalized, by = "KO")
+
+str(ko_annotated)
+
+pathway_counts <- ko_annotated %>%
+  group_by(Pathway_Name) %>%
+  summarise(across(starts_with("t"), ~ sum(.x, na.rm = TRUE)))
+
+pathway_counts <- ko_annotated %>%
+  select(-Phylum, -Class) %>%
+  group_by(Order) %>%
+  summarise(across(starts_with("t"), ~ sum(.x, na.rm = TRUE)))
+
+
+pathway_mat <- pathway_counts %>%
+  column_to_rownames(var = "Pathway_Name") %>%
+  as.matrix()
+
+pathway_mat <- pathway_counts %>%
+  column_to_rownames(var = "Order") %>%
+  as.matrix()
+
+tax_pathway <- data.frame(
+  Pathway = rownames(pathway_mat)
+)
+
+rownames(tax_pathway) <- rownames(pathway_mat)
+
+colnames(tax_pathway)[1] <- "Kingdom"
+tax_pathway$Phylum  <- NA
+tax_pathway$Class   <- NA
+tax_pathway$Order   <- NA
+tax_pathway$Family  <- NA
+tax_pathway$Genus   <- NA
+tax_pathway$Species <- NA
+
+tax_pathway <- tax_pathway[, c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")]
+
+
+```
+
+
+```{r}
+#define the classification rank
+taxa = "Kingdom"
+
+# On combine les tableaux de données dans un object phyloseq 
+ps_pathway <- phyloseq(
+  otu_table(pathway_mat, taxa_are_rows = TRUE),
+  tax_table(as.matrix(tax_pathway)),
+  sample_data(ko_meta)
+)
+
+# Lancer l'analyse LEfSe
+out_lefse <- run_lefse(ps_pathway, group = "lifestyle", taxa_rank = taxa)
+
+# Extraire les résultats sous forme de tableau
+df_lefse_function = marker_table(out_lefse) %>% data.frame()
+
+df_lefse_function$feature
+
+# Keeping only the 9 taxa with the highest LDA score in each group 
+number_of_taxa = 9 
+lda_out = list()
+i = 0 
+for (each_region in unique(df_lefse_function$enrich_group)){
+  i = i + 1 
+  lifestyle = subset(df_lefse_function, enrich_group == each_region)
+  top_taxa=head(lifestyle[order(lifestyle$ef_lda, decreasing= T),], n=number_of_taxa)
+  lda_out[[i]] = top_taxa
+}
+
+df_function = do.call("rbind", lda_out)
+
+
+# Multiplier par -1 les score LDA pour la région sous la langue 
+df_function$ef_lda = with(df_function, ifelse(enrich_group == "planktonic", -1 * df_function$ef_lda, 1*df_function$ef_lda))
+
+df_function$enrich_group <- stringr::str_to_sentence(df_function$enrich_group)
+```
+
+
+````{r}
+
+ggplot(df_function, aes(x = ef_lda, y = reorder(feature, ef_lda), fill = enrich_group)) + 
+  geom_bar(stat = "identity", width = 0.7, size = 0.5, color = "black") +
+  custom_theme() + 
+  facet_grid(rows = vars(enrich_group), scales = "free_y", space = "free_y") +
+  theme(
+    legend.position = "none", 
+    strip.text.y = element_text(angle = 0, size = 9, hjust = 0.1, face = "bold"),
+    axis.text.y = element_text(size = 9, hjust = 1), 
+    axis.text.x = element_text(size = 8),  
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12)
+  ) +
+  scale_x_continuous(limits = c(-6, 6), expand = c(0, 0)) +
+  labs(x = "LDA Score", y = "Pathway") + 
+  scale_fill_manual(values = c("cornflowerblue", "darkgreen")) + 
+  geom_vline(xintercept = 0, linewidth = 0.25, colour = "black")
+
+df_lefse_function$feature
+
+ggsave(filename = "lefse.l.svg", plot = lefse.l, device="svg", width = 7.00, height = 4.00, units = "in", dpi = 300)
+
+
+
+
+
+
+
+
+```
+
+now i want to test seasons :)
+```{r}
+
+#define the classification rank
+taxa = "Kingdom"
+
+# On combine les tableaux de données dans un object phyloseq 
+ps_pathway <- phyloseq(
+  otu_table(pathway_mat, taxa_are_rows = TRUE),
+  tax_table(as.matrix(tax_pathway)),
+  sample_data(ko_meta)
+)
+
+# Lancer l'analyse LEfSe
+out_lefse_seasons <- run_lefse(ps_pathway, group = "season", taxa_rank = taxa)
+
+# Extraire les résultats sous forme de tableau
+df_lefse_seasons = marker_table(out_lefse_seasons) %>% data.frame()
+
+
+
+
+# Keeping only the 9 taxa with the highest LDA score in each group 
+number_of_taxa = 12 
+lda_out = list()
+i = 0 
+for (each_region in unique(df_lefse_seasons$enrich_group)){
+  i = i + 1 
+  lifestyle = subset(df_lefse_seasons, enrich_group == each_region)
+  top_taxa=head(lifestyle[order(lifestyle$ef_lda, decreasing= T),], n=number_of_taxa)
+  lda_out[[i]] = top_taxa
+}
+
+df_seasons = do.call("rbind", lda_out)
+
+
+# Multiplier par -1 les score LDA pour la région sous la langue 
+df_seasons$ef_lda = with(df_seasons, ifelse(enrich_group == "winter", -1 * df_seasons$ef_lda, 1*df_seasons$ef_lda))
+
+df_seasons$enrich_group <- stringr::str_to_sentence(df_seasons$enrich_group)
+
+df_seasons$feature
+
+```
+
+
+```{r}
+
+lefse.s <- ggplot(df_seasons, aes(x = ef_lda, y = reorder(feature, ef_lda), fill = enrich_group)) + 
+  geom_bar(stat = "identity", width = 0.7, size = 0.5, color = "black") +
+  custom_theme() + 
+  facet_grid(rows = vars(enrich_group), scales = "free_y", space = "free_y") +
+  theme(
+    legend.position = "none", 
+    strip.text.y = element_text(angle = 0, size = 9, hjust = 0.1, face = "bold"),
+    axis.text.y = element_text(size = 9, hjust = 1), 
+    axis.text.x = element_text(size = 8),  
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12)
+  ) +
+  scale_x_continuous(limits = c(-6, 6), expand = c(0, 0)) +
+  labs(x = "LDA Score", y = "Pathway") + 
+  scale_fill_manual(values = c("darkred", "cornflowerblue")) + 
+  geom_vline(xintercept = 0, linewidth = 0.25, colour = "black")
+
+
+
+ggsave(filename = "lefse.seasons.svg", plot = lefse.s, device= "svg", width = 7.00, height = 4.00, units = "in", dpi = 300)
+
+
+````
+
+
+
+
+
+

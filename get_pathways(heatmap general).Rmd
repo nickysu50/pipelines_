@@ -1,0 +1,598 @@
+---
+title: "KEGGREST"
+output: html_document
+date: "2025-04-08"
+---
+#loading the packages
+```{r}
+if (!requireNamespace("KEGGREST", quietly = TRUE)) {
+  install.packages("BiocManager")
+  BiocManager::install("KEGGREST")
+}
+
+install.packages("ggh4x")
+install.packages("ggnewscale")
+
+library(ggh4x)
+library(KEGGREST)
+library(tidyverse)
+library(ggnewscale)
+library(tidyr)
+
+library(patchwork)
+
+```
+
+
+
+#script to get the pathways and k number associated
+````{r}
+all_pathways <- keggList("pathway")
+
+print(all_pathways)
+
+pathway_df <- data.frame(
+  pathway_ID = names(all_pathways),
+  Description = as.character(all_pathways),
+  row.names = NULL
+)
+
+all_pathways <- pathway_df["pathway_ID"]
+
+all_pathways <- as.character(all_pathways$pathway_ID)
+
+print(all_pathways)
+
+
+```
+
+#now creating the pathways table and their k number
+```{r}
+
+cat("Checking which pathways contain KOs...\n")
+
+all_pathways_ko <- gsub("^map", "ko", all_pathways)
+
+result_pathways <- map_df(all_pathways_ko, function(pid) {
+  cat("Fetching", pid, "...\n")
+  
+  info <- tryCatch(keggGet(pid)[[1]], error = function(e) return(NULL))
+  if (is.null(info) || is.null(info$ORTHOLOGY)) return(NULL)
+  
+  # Create KO data first
+  KO_df <- tibble(
+    KO = names(info$ORTHOLOGY),
+    KO_Description = unname(info$ORTHOLOGY)
+  )
+
+  # Then add pathway info to each row
+  KO_df %>%
+    mutate(
+      Pathway_ID = pid,
+      Pathway_Name = paste(info$NAME, collapse = "; ")
+    )
+})
+
+write.table(result_pathways, "kegg_pathways.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+
+#load the data
+ko_asv <- read_excel("all13 no normalized NO transposed.xlsx")
+
+
+ko_asv <- column_to_rownames(ko_asv, var = names(ko_asv)[1])
+
+all(colnames(ko_asv) %in% names(total_reads)) 
+
+total_reads <- c(
+  "t0_water_winter" = 91080040,
+  "t1_water_winter" = 105155034,
+  "t2_water_winter" = 126922246,
+  "t3_water_winter" = 118719880,
+  "t0_water_summer" = 101551626,
+  "t1_water_summer" = 118387904,
+  "t2_water_summer" = 124541282,
+  "t3_water_summer" = 96596350,
+  "t1_rocks_winter" = 4360034,
+  "t2_rocks_winter" = 106865534,
+  "t3_rocks_winter" = 102643344,
+  "t1_rocks_summer" = 729672,
+  "t2_rocks_summer" = 13529884
+)
+
+
+#normalize the data
+ko_asv_normalized <- sweep(ko_asv, 2, total_reads[colnames(ko_asv)], FUN = "/")
+
+#load the pathway info
+ko_taxa <- read_tsv("kegg_pathways.tsv")
+
+#finally merging my data with the kegg pathways
+
+ko_asv_normalized <- ko_asv_normalized %>%
+  tibble::rownames_to_column(var = "KO")
+
+merge_data <- left_join(ko_taxa, ko_asv_normalized, by = "KO")
+
+merged_data_clean <- merge_data %>%
+  filter(!if_all(5:ncol(.), is.na))
+
+
+
+write.table(merged_data_clean, "kegg_clean.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+
+colnames(merged_data_clean)
+
+str(merged_data_clean)
+
+
+n_distinct(merged_data_clean$Pathway_Name)
+
+
+```
+
+
+#testing
+
+```{r}
+# Identify sample columns
+sample_cols <- grep("^t\\d+_", names(merged_data_clean), value = TRUE)
+
+# Sum KO abundances by Pathway_Name for each sample
+pathway_sums <- merged_data_clean %>%
+  group_by(Pathway_Name) %>%
+  summarise(across(all_of(sample_cols), ~ sum(.x, na.rm = TRUE))) %>%
+  ungroup()
+
+# Convert to percentages per sample
+pathway_percent <- pathway_sums %>%
+  mutate(across(all_of(sample_cols), ~ .x / sum(.x, na.rm = TRUE) * 100))
+
+str(pathway_percent)
+
+# Calculate the total relative abundance of each pathway across all samples
+pathway_totals <- pathway_percent %>%
+  rowwise() %>%
+  mutate(Total_Abundance = sum(c_across(all_of(sample_cols)), na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(desc(Total_Abundance))
+
+str(pathway_totals)
+
+sessile_cols <- c("t1_rocks_winter", "t2_rocks_winter", "t3_rocks_winter", 
+                  "t1_rocks_summer", "t2_rocks_summer")
+
+planktonic_cols <- c("t0_water_winter", "t1_water_winter", "t2_water_winter", "t3_water_winter",
+                     "t0_water_summer", "t1_water_summer", "t2_water_summer", "t3_water_summer")
+
+summer_cols <- c(
+  "t0_water_summer", "t1_water_summer", "t2_water_summer", "t3_water_summer",
+  "t1_rocks_summer", "t2_rocks_summer"
+)
+
+winter_cols <- c(
+  "t0_water_winter", "t1_water_winter", "t2_water_winter", "t3_water_winter",
+  "t1_rocks_winter", "t2_rocks_winter", "t3_rocks_winter"
+)
+
+
+pathway_avg_by_lifestyle <- pathway_totals %>%
+  rowwise() %>%
+  mutate(
+    Sessile_Avg = mean(c_across(all_of(sessile_cols)), na.rm = TRUE),
+    Planktonic_Avg = mean(c_across(all_of(planktonic_cols)), na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  select(Pathway_Name, Sessile_Avg, Planktonic_Avg)
+
+pathway_avg_by_season <- pathway_totals %>%
+  rowwise() %>%
+  mutate(
+    Summer_Avg = mean(c_across(all_of(summer_cols)), na.rm = TRUE),
+    Winter_Avg = mean(c_across(all_of(winter_cols)), na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  select(Pathway_Name, Summer_Avg, Winter_Avg)
+
+pathway_avg_by_lifestyle <- pathway_avg_by_lifestyle %>%
+  mutate(Difference = Planktonic_Avg - Sessile_Avg)
+
+
+
+
+
+
+
+```
+
+
+```{r}
+#setting the tables
+
+top25_pathways <- pathway_totals %>%
+  slice_max(order_by = Total_Abundance, n = 25)
+
+
+
+top25_long <- top25_pathways %>%
+  select(-Total_Abundance) %>%
+  pivot_longer(cols = all_of(sample_cols), names_to = "sample", values_to = "count")
+
+
+top25_long <- top25_long %>%
+  mutate(
+    lifestyle = case_when(
+      grepl("water", sample) ~ "planktonic",
+      grepl("rocks", sample) ~ "sessile",
+      TRUE ~ "unknown"
+    ),
+    season = case_when(
+      grepl("winter", sample) ~ "winter",
+      grepl("summer", sample) ~ "summer",
+      TRUE ~ "unknown"
+    )
+  )
+
+top25_long$Functional_Group <- dplyr::case_when(
+  top25_long$Pathway_Name %in% c("Ribosome", "Aminoacyl-tRNA biosynthesis", "Two-component system", 
+                                 "Quorum sensing", "Bacterial secretion system") ~ "Genetic & Regulatory Systems",
+  
+  top25_long$Pathway_Name %in% c("Oxidative phosphorylation", "Methane metabolism", "Sulfur metabolism", 
+                                 "Glycolysis / Gluconeogenesis", "Pyruvate metabolism") ~ "Energy Metabolism",
+  
+  top25_long$Pathway_Name %in% c("Butanoate metabolism", "Propanoate metabolism", "Benzoate degradation",
+                                 "Glyoxylate and dicarboxylate metabolism", "Other carbon fixation pathways") ~ "Carbon metabolism & Fixation",
+  
+  top25_long$Pathway_Name %in% c("Purine metabolism", "Pyrimidine metabolism", "Cysteine and methionine metabolism",
+                                 "Glycine, serine and threonine metabolism", "Arginine and proline metabolism",
+                                 "Phenylalanine, tyrosine and tryptophan biosynthesis") ~ "Amino Acid & Nucleotide Metabolism",
+  
+  top25_long$Pathway_Name %in% c("ABC transporters", "Biofilm formation - Vibrio cholerae", 
+                                 "Biosynthesis of various nucleotide sugars", 
+                                 "Amino sugar and nucleotide sugar metabolism") ~ "Transport & Structural Pathways"
+)
+
+
+top25_long <- top25_long %>%
+  mutate(lifestyle = str_to_title(lifestyle))
+
+
+# heatmap lifestyle
+
+heatmap.g <- ggplot(top25_long, aes(x = sample, y = Pathway_Name, fill = count)) +
+  geom_tile(color = "black", size = 0.3) +
+  
+  # Facet by lifestyle and season
+  ggh4x::facet_grid2(
+    ~ Functional_Group ~ lifestyle, 
+    scales = "free", 
+    space = "free",
+    strip = ggh4x::strip_themed(
+      background_x = list(
+        element_rect(fill = "cornflowerblue", color = "black"),  
+        element_rect(fill = "#66A76C", color = "black") 
+        ),
+      text_x = list(
+    element_text(size = 12, face = "bold", color = "black")  # style for lifestyle strip (top)
+  ),
+    text_y = list(
+        element_text(angle = 0, hjust = 0, size = 12, face = "bold")  # horizontal Functional_Group labels
+      )
+    )
+  ) +
+
+  # Fill gradient for count (assumed to be percentage)
+ scale_fill_gradientn(
+    colors = c("white", "#EEE5F8", "#D8BFD8", "#A18BD6", "#6A5ACD", "#663399"),
+    values = scales::rescale(c(0, 1, 2, 4, 6, 10)),  # Adjust based on data spread
+    limits = c(0, 10),  # Upper limit based on your max percentage
+    labels = scales::label_percent(scale = 1),
+    name = "Abundance (%)"
+  ) +
+
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+
+  theme_minimal(base_size = 10) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 9, color = "black"),
+    axis.text.y = element_text(size = 10, face = "italic", color = "black"),
+    axis.title.x = element_text(size = 10, face = "bold"),
+    axis.title.y = element_text(size = 9, face = "bold"),
+    strip.text = element_text(size = 9, face = "bold"),
+    strip.text.y.left = element_text(angle = 180, hjust = 0, size = 17, face = "bold"),
+    legend.title = element_text(size = 9, face = "bold"),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.4),
+    plot.margin = unit(c(1, 1, 1, 1), "cm")
+  ) +
+  
+  labs(
+    x = "Samples",
+    y = "",
+    fill = "Abundance (%)",
+      )
+
+ggsave(filename = "heatmap.g.svg", plot = heatmap.g, device="svg", width = 12.80, height = 8.50, units = "in", dpi = 300)
+
+
+
+
+# info about the pathways
+
+pathway_avg_by_group <- top25_long %>%
+  group_by(Pathway_Name, lifestyle, season) %>%
+  summarise(Average_Percentage = mean(count, na.rm = TRUE)) %>%
+  arrange(desc(Average_Percentage))
+
+sessile_avg <- top25_long %>%
+  filter(lifestyle == "sessile") %>%
+  group_by(Pathway_Name) %>%
+  summarise(Average_Percentage = mean(count, na.rm = TRUE)) %>%
+  arrange(desc(Average_Percentage))
+
+sessile_avg <- top25_long %>%
+  filter(lifestyle == "sessile") %>%
+  group_by(Pathway_Name) %>%
+  summarise(Sessile_Avg = mean(count, na.rm = TRUE), .groups = "drop")
+
+planktonic_avg <- top25_long %>%
+  filter(lifestyle == "planktonic") %>%
+  group_by(Pathway_Name) %>%
+  summarise(Planktonic_Avg = mean(count, na.rm = TRUE), .groups = "drop")
+
+pathway_diff <- full_join(sessile_avg, planktonic_avg, by = "Pathway_Name") %>%
+  mutate(Difference = Planktonic_Avg - Sessile_Avg) %>%
+  arrange(desc(abs(Difference)))
+
+
+top25_long <- top25_long %>%
+  mutate(season = str_to_title(season))
+
+top25_long <- top25_long %>%
+  mutate(sample = sample %>%
+           str_replace("^t0_", "0d_") %>%
+           str_replace("^t1_", "7d_") %>%
+           str_replace("^t2_", "14d_") %>%
+           str_replace("^t3_", "21d_"))
+
+sample_order <- c(
+  # Day 0
+  "0d_water_winter", "0d_water_summer",
+  # Day 7
+  "7d_water_winter", "7d_water_summer", "7d_rocks_winter", "7d_rocks_summer",
+  # Day 14
+  "14d_water_winter", "14d_water_summer", "14d_rocks_winter", "14d_rocks_summer",
+  # Day 21
+  "21d_water_winter", "21d_water_summer", "21d_rocks_winter", "21d_rocks_summer"
+)
+
+top25_long$sample <- factor(top25_long$sample, levels = sample_order)
+
+#heatmap seasons 
+
+
+ggplot(top25_long, aes(x = sample, y = Pathway_Name, fill = count)) +
+  geom_tile(color = "black", size = 0.3) +
+  
+  # Facet by lifestyle and season
+  ggh4x::facet_grid2(
+    ~ Functional_Group ~ season, 
+    scales = "free", 
+    space = "free",
+    strip = ggh4x::strip_themed(
+      background_x = list(
+        element_rect(fill = "#F4A460", color = "black"),  
+        element_rect(fill = "cornflowerblue", color = "black") 
+        ),
+    text_y = list(
+        element_text(angle = 0, hjust = 0, size = 7, face = "bold")  # horizontal Functional_Group labels
+      )
+    )
+  ) +
+
+  # Fill gradient for count (assumed to be percentage)
+  scale_fill_gradientn(
+    colors = c("white", "#EEE5F8", "#D8BFD8", "#A18BD6", "#6A5ACD", "#663399"),
+    values = scales::rescale(c(0, 1, 2, 4, 6, 10)),  # Adjust based on data spread
+    limits = c(0, 10),  # Upper limit based on your max percentage
+    labels = scales::label_percent(scale = 1),
+    name = "Abundance (%)"
+  ) +
+
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+
+  theme_minimal(base_size = 10) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7, color = "black"),
+    axis.text.y = element_text(size = 7, face = "italic", color = "black"),
+    axis.title.x = element_text(size = 9, face = "bold"),
+    axis.title.y = element_text(size = 9, face = "bold"),
+    strip.text = element_text(size = 7, face = "bold"),
+    strip.text.y.left = element_text(angle = 180, hjust = 0, size = 6, face = "bold"),
+    legend.title = element_text(size = 6, face = "bold"),
+    legend.text = element_text(size = 6),
+    legend.key.size = unit(0.3, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.4),
+    plot.margin = unit(c(1, 1, 1, 1), "cm")
+  ) +
+  
+  labs(
+    x = "Samples",
+    y = "Pathway",
+    fill = "Abundance (%)",
+      )
+
+ggsave(filename = "heatmap.g.s.svg", plot = heatmap.g.s, device="svg", width = 9.00, height = 6.75, units = "in", dpi = 300)
+
+````
+#working with log
+````{r}
+
+pathway_sums <- merged_data_clean %>%
+  group_by(Pathway_Name) %>%
+  summarise(across(all_of(sample_cols), ~ sum(.x, na.rm = TRUE))) %>%
+  ungroup()
+
+# 2. Apply log10 AFTER the sum
+pathway_sums_log <- pathway_sums %>%
+  mutate(across(all_of(sample_cols), ~ log10(.x + 1e-6)))
+
+pathway_totals_log <- pathway_sums_log %>%
+  rowwise() %>%
+  mutate(Total_Log_Abundance = sum(c_across(all_of(sample_cols)), na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(desc(Total_Log_Abundance))
+
+# Top 25 most abundant pathways (after correct log transformation)
+top25_pathways_log <- pathway_totals_log %>%
+  slice_max(order_by = Total_Log_Abundance, n = 25)
+
+# Reshape to long format for ggplot
+top25_long_log <- top25_pathways_log %>%
+  select(-Total_Log_Abundance) %>%
+  pivot_longer(
+    cols = all_of(sample_cols),
+    names_to = "sample",
+    values_to = "log_count"
+)
+
+top25_long_log <- top25_long_log %>%
+  mutate(
+    lifestyle = case_when(
+      grepl("water", sample) ~ "planktonic",
+      grepl("rocks", sample) ~ "sessile",
+      TRUE ~ "unknown"
+    ),
+    season = case_when(
+      grepl("winter", sample) ~ "winter",
+      grepl("summer", sample) ~ "summer",
+      TRUE ~ "unknown"
+    )
+  )
+
+unique(top25_long_log$Pathway_Name)
+
+pathway_to_group <- c(
+  # 🟦 1. Transport & Signaling
+  "ABC transporters" = "Transport & Signaling",
+  "Two-component system" = "Transport & Signaling",
+  "Quorum sensing" = "Transport & Signaling",
+  "Bacterial secretion system" = "Transport & Signaling",
+  "Flagellar assembly" = "Transport & Signaling",
+  "Bacterial chemotaxis" = "Transport & Signaling",
+
+  # 🟧 2. Energy & Respiration
+  "Oxidative phosphorylation" = "Energy & Respiration",
+  "Sulfur metabolism" = "Energy & Respiration",
+  "Methane metabolism" = "Energy & Respiration",
+
+  # 🟩 3. Central Metabolism
+  "Pyruvate metabolism" = "Central Metabolism",
+  "Glyoxylate and dicarboxylate metabolism" = "Central Metabolism",
+  "Glycolysis / Gluconeogenesis" = "Central Metabolism",
+  "Other carbon fixation pathways" = "Central Metabolism",
+  "Butanoate metabolism" = "Central Metabolism",
+  "Propanoate metabolism" = "Central Metabolism",
+
+  # 🟨 4. Amino Acid & Nitrogen Metabolism
+  "Cysteine and methionine metabolism" = "Amino Acid & Nitrogen Metabolism",
+  "Glycine, serine and threonine metabolism" = "Amino Acid & Nitrogen Metabolism",
+  "Aminoacyl-tRNA biosynthesis" = "Amino Acid & Nitrogen Metabolism",
+
+  # 🟫 5. Genetic & Nucleotide Processes
+  "Ribosome" = "Genetic & Nucleotide Processes",
+  "Purine metabolism" = "Genetic & Nucleotide Processes",
+  "Pyrimidine metabolism" = "Genetic & Nucleotide Processes",
+  "Porphyrin metabolism" = "Genetic & Nucleotide Processes",
+  "Biosynthesis of various nucleotide sugars" = "Genetic & Nucleotide Processes",
+  "Amino sugar and nucleotide sugar metabolism" = "Genetic & Nucleotide Processes",
+
+  # 🟥 6. Xenobiotics & Degradation
+  "Benzoate degradation" = "Xenobiotics & Degradation"
+)
+
+
+# Add the Functional_Group to your log-transformed long dataframe
+top25_long_log <- top25_long_log %>%
+  mutate(Functional_Group = pathway_to_group[Pathway_Name])
+
+ggplot(top25_long_log, aes(x = sample, y = Pathway_Name, fill = log_count)) +
+  geom_tile(color = "black", size = 0.2) +
+
+  # Facet by Functional Group (rows) and Lifestyle (columns)
+  ggh4x::facet_grid2(
+    rows = vars(Functional_Group),
+    cols = vars(lifestyle),
+    scales = "free",
+    space = "free",
+    strip = ggh4x::strip_themed(
+      background_x = list(
+        element_rect(fill = "#ADD8E6", color = "black"),  # e.g., planktonic
+        element_rect(fill = "#FFDAB9", color = "black")   # e.g., sessile
+      ),
+      text_y = list(
+        element_text(angle = 0, hjust = 0, size = 6, face = "bold")
+      )
+    )
+  ) +
+
+  # Color scale for log10 abundance
+  scale_fill_gradientn(
+    colors = c("white", "cornflowerblue", "darkblue"),
+    values = scales::rescale(c(-6, -5, -4.05)),
+    limits = c(-6, -4.05),
+    name = "Log10 Abundance"
+  ) +
+
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+
+  theme_minimal(base_size = 10) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 6, color = "black"),
+    axis.text.y = element_text(size = 7, face = "italic", color = "black"),
+    axis.title.x = element_text(size = 9, face = "bold"),
+    axis.title.y = element_text(size = 9, face = "bold"),
+    strip.text = element_text(size = 7, face = "bold"),
+    strip.text.y.left = element_text(angle = 180, hjust = 0, size = 7, face = "bold"),
+    legend.title = element_text(size = 8, face = "bold"),
+    legend.text = element_text(size = 6),
+    legend.key.size = unit(0.4, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.4),
+    plot.margin = unit(c(1, 1, 1, 1), "cm")
+  ) +
+  
+  labs(
+    x = "Samples",
+    y = "Pathway",
+    fill = "Log10 Abundance"
+  )
+
+range(top25_long_log$log_count, na.rm = TRUE)
+summary(top25_long_log$log_count)
+
+````
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

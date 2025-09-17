@@ -1,0 +1,493 @@
+---
+title: "B-diversity selected pathways"
+output: html_document
+date: "2025-06-02"
+---
+
+
+```{r}
+library(vegan)
+library(dplyr)
+library(glue)
+
+
+```
+
+
+
+```{r}
+
+
+selected_pathways <- c(
+  "Aminoacyl-tRNA biosynthesis",
+  "Pyrimidine metabolism",
+  "Purine metabolism",
+  "Carbon fixation by Calvin cycle",
+  "Fructose and mannose metabolism",
+  "DNA replication",
+  "Cell cycle - Caulobacter",
+  "Pentose phosphate pathway",
+  "Base excision repair",
+  "Pantothenate and CoA biosynthesis",
+  "Arginine biosynthesis",
+  "Biosynthesis of ansamycins",
+  "MAPK signaling pathway - plant",
+  "Protein processing in endoplasmic reticulum",
+  "N-Glycan biosynthesis",
+  "Longevity regulating pathway",
+  "Plant hormone signal transduction",
+  "MAPK signaling pathway - fly",
+  "Coronavirus disease - COVID-19",
+  "Biosynthesis of various antibiotics; Kanosamine biosynthesis, Aurachin biosynthesis, Bacilysin biosynthesis, Puromycin biosynthesis, Dapdiamides biosynthesis, Fosfomycin biosynthesis, Cremeomycin biosynthesis, Fumagillin biosynthesis, Pentalenolactone biosynthesis, Terpentecin biosynthesis, Roseoflavin biosynthesis, Cycloserine biosynthesis",
+  "Prolactin signaling pathway",
+  "Selenocompound metabolism",
+  "FoxO signaling pathway",
+  "African trypanosomiasis",
+  "Lipoarabinomannan (LAM) biosynthesis",
+  "Autophagy - yeast",
+  "Benzoate degradation",
+  "Steroid degradation",
+  "Nitrogen metabolism",
+  "Toluene degradation",
+  "Xylene degradation",
+  "Chlorocyclohexane and chlorobenzene degradation",
+  "Pathways in cancer",
+  "Prion disease",
+  "Non-alcoholic fatty liver disease",
+  "Amyotrophic lateral sclerosis",
+  "Pathways of neurodegeneration - multiple diseases",
+  "Thermogenesis",
+  "Huntington disease",
+  "Cardiac muscle contraction",
+  "Dioxin degradation",
+  "Adipocytokine signaling pathway",
+  "Efferocytosis",
+  "Shigellosis",
+  "Ferroptosis",
+  "Axon regeneration"
+)
+
+selected_pathways
+
+ko_filtered <- merged_data_clean %>%
+  filter(Pathway_Name %in% selected_pathways)
+
+ko_filtered <- ko_filtered %>%
+  select(-t1_rocks_summer)
+
+# First, get only abundance columns
+abundance_cols <- grep("^t\\d+_", names(ko_filtered), value = TRUE)
+
+# Then, sum by pathway
+pathway_abundance <- ko_filtered %>%
+  group_by(Pathway_Name) %>%
+  summarise(across(all_of(abundance_cols), sum), .groups = "drop")
+
+
+# Set Pathway_Name as rownames and transpose
+pathway_matrix <- as.data.frame(pathway_abundance)
+rownames(pathway_matrix) <- pathway_matrix$Pathway_Name
+pathway_matrix <- pathway_matrix[ , -1]  # remove Pathway_Name column
+
+
+# Transpose, now we have the data matrix
+pathway_t <- t(pathway_matrix)
+
+```
+
+
+```{r}
+#we calculate the hellinger and bray curtis
+
+selected_hellinger = decostand(pathway_t, method = "hellinger")
+
+dist_selected = vegdist(selected_hellinger, method = "bray")
+
+PCOA.h.selected = cmdscale(dist_selected, eig = TRUE, add = TRUE)
+
+position.selected = PCOA.h.selected$points
+
+colnames(position.selected) = c("Axis.1", "Axis.2")
+
+percent_explained.select = 100*PCOA.h.selected$eig/sum(PCOA.h.selected$eig) 
+
+reduced_percent.selec = format(round(percent_explained.select[1:2], digits = 2), nsmall = 1, trim = TRUE)
+
+
+pretty_labs.select = c(glue("Axis 1 ({reduced_percent.selec[1]}%)"), glue("Axis 2 ({reduced_percent.selec[2]}%)")) 
+
+df.select = merge(position.selected, ko_meta, by = "row.names") 
+rownames(df.select) <- df.select$Row.names
+df.select = df.select[-1]
+
+ko_meta <- ko_meta[rownames(ko_meta) != "t1_rocks_summer", ]
+ko_meta <- ko_meta[rownames(ko_meta) != "t3_rocks_summer", ]
+
+df.select$lifestyle <- str_to_title(df.select$lifestyle)
+
+ggplot(df.select, aes(x = Axis.1, y = Axis.2, color = lifestyle)) + 
+  custom_theme() + 
+  geom_point(size = 2, position = position_jitter(width = 0.02, height = 0.02)) + 
+  labs(x = pretty_labs.select[1], y = pretty_labs.select[2], color = "Lifestyle", shape = "Season") + 
+  scale_y_continuous(limits = c(-0.2, 0.2), expand = c(0, 0)) + 
+  scale_x_continuous(limits = c(-0.25, 0.25), expand = c(0, 0)) + 
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.2) + 
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.2) + 
+  scale_color_manual(values = c("cornflowerblue", "darkgreen")) +
+  stat_ellipse(aes(group = lifestyle), level = 0.95) +
+  theme(
+  legend.text = element_text(size = 17),
+  legend.title = element_text(size = 19),
+  legend.spacing.y = unit(9, "pt"),
+  legend.box = "vertical",
+  axis.title = element_text(size = 17),
+  axis.text = element_text(size = 17)
+)
+
+
+dbrda.s <- ggplot(df.select, aes(x = Axis.1, y = Axis.2, fill = lifestyle)) + 
+  custom_theme() + 
+  geom_point(shape = 21, 
+             size = 2, 
+             stroke = 0.6, 
+             color = "black", 
+             position = position_jitter(width = 0.02, height = 0.02)) + 
+  labs(x = pretty_labs.select[1], 
+       y = pretty_labs.select[2], 
+       fill = "Lifestyle", 
+       shape = "Season") + 
+  scale_y_continuous(limits = c(-0.2, 0.2), expand = c(0, 0)) + 
+  scale_x_continuous(limits = c(-0.25, 0.25), expand = c(0, 0)) + 
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.2) + 
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.2) + 
+  scale_fill_manual(values = c("cornflowerblue", "darkgreen")) +
+  stat_ellipse(aes(color = lifestyle, group = lifestyle), linewidth = 0.4, linetype = "dashed") +
+  scale_color_manual(values = c("cornflowerblue", "darkgreen"), guide = "none") +  # hide color legend
+  guides(
+    fill = guide_legend(
+      byrow = TRUE,
+      label.theme = element_text(size = 12, margin = margin(b = 8))
+    )
+  ) +
+  theme(
+    legend.title = element_text(size = 13),
+    legend.box = "vertical",
+    axis.title = element_text(size = 15),
+    axis.text = element_text(size = 15)
+  )
+
+ggsave(filename = "beta_select.svg", plot = dbrda.s, device= "svg", width = 6.58, height = 3.60, units = "in", dpi = 300)
+
+
+ggsave("beta_selec.png", plot = B_diversity, width = 10, height = 6, dpi = 300)
+
+str(dist_selected)
+
+
+
+```
+
+
+
+```{r}
+
+# Get sample names from the distance matrix
+sample_names <- attr(dist_selected, "Labels")
+
+sample_names5
+
+# Subset ko_meta to keep only those rows
+ko_meta_subset <- ko_meta[rownames(ko_meta) %in% sample_names, ]
+
+# Reorder to match the distance matrix order
+ko_meta_subset <- ko_meta_subset[sample_names, ]
+
+adonis2(dist_selected ~ lifestyle, data = ko_meta_subset, permutations = 9999)
+
+
+adonis2(dist_selected ~ lifestyle, data = ko_meta, permutations = 9999)
+adonis2(dist_selected ~ ko_meta$lifestyle, permutations = 9999)
+
+
+```
+#seasons
+
+```{r}
+
+pathway_names <- c(
+  "Lipoic acid metabolism",
+  "Glycerolipid metabolism",
+  "Pentose and glucuronate interconversions",
+  "Cysteine and methionine metabolism",
+  "Ascorbate and aldarate metabolism",
+  "Necroptosis",
+  "Insect hormone biosynthesis",
+  "Thyroid hormone signaling pathway",
+  "Carotenoid biosynthesis",
+  "Cushing syndrome",
+  "Renal cell carcinoma",
+  "Penicillin and cephalosporin biosynthesis",
+  "Glyoxylate and dicarboxylate metabolism",
+  "Biofilm formation - Escherichia coli",
+  "Tuberculosis",
+  "Salmonella infection"
+)
+
+
+ko_filtered.s <- merged_data_clean %>%
+  filter(Pathway_Name %in% pathway_names)
+
+ko_filtered.s <- ko_filtered.s %>%
+  select(-t1_rocks_summer)
+
+# First, get only abundance columns
+abundance_cols.s <- grep("^t\\d+_", names(ko_filtered.s), value = TRUE)
+
+# Then, sum by pathway
+pathway_abundance.s <- ko_filtered.s %>%
+  group_by(Pathway_Name) %>%
+  summarise(across(all_of(abundance_cols.s), sum), .groups = "drop")
+
+
+# Set Pathway_Name as rownames and transpose
+pathway_matrix.s <- as.data.frame(pathway_abundance.s)
+rownames(pathway_matrix.s) <- pathway_matrix.s$Pathway_Name
+pathway_matrix.s <- pathway_matrix.s[ , -1]  # remove Pathway_Name column
+
+
+# Transpose, now we have the data matrix
+pathway_s <- t(pathway_matrix.s)
+
+
+
+
+`````
+
+
+
+```{r}
+#we calculate the hellinger and bray curtis
+
+selected_hellinger.s = decostand(pathway_s, method = "hellinger")
+
+dist_selected.s = vegdist(selected_hellinger.s, method = "bray")
+
+PCOA.h.selected.s = cmdscale(dist_selected.s, eig = TRUE, add = TRUE)
+
+position.selected.s = PCOA.h.selected.s$points
+
+colnames(position.selected.s) = c("Axis.1", "Axis.2")
+
+percent_explained.select.s = 100*PCOA.h.selected.s$eig/sum(PCOA.h.selected.s$eig) 
+
+reduced_percent.selec.s = format(round(percent_explained.select.s[1:2], digits = 2), nsmall = 1, trim = TRUE)
+
+
+pretty_labs.select.s = c(glue("Axis 1 ({reduced_percent.selec.s[1]}%)"), glue("Axis 2 ({reduced_percent.selec.s[2]}%)")) 
+
+df.select.s = merge(position.selected.s, ko_meta, by = "row.names") 
+rownames(df.select.s) <- df.select.s$Row.names
+df.select.s = df.select.s[-1]
+
+ko_meta <- ko_meta[rownames(ko_meta) != "t1_rocks_summer", ]
+ko_meta <- ko_meta[rownames(ko_meta) != "t3_rocks_summer", ]
+
+df.select.s$season <- str_to_title(df.select.s$season)
+
+dbrda.ss <- ggplot(df.select.s, aes(x = Axis.1, y = Axis.2, fill = season)) + 
+  custom_theme() + 
+  geom_point(shape = 21, 
+             size = 2, 
+             stroke = 0.6, 
+             color = "black", 
+             position = position_jitter(width = 0.02, height = 0.02)) + 
+  labs(x = pretty_labs.select.s[1], 
+       y = pretty_labs.select.s[2], 
+       fill = "Season", 
+       shape = "Season") + 
+  scale_y_continuous(limits = c(-0.17, 0.17), expand = c(0, 0)) + 
+  scale_x_continuous(limits = c(-0.2, 0.2), expand = c(0, 0)) + 
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.2) + 
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.2) + 
+  scale_fill_manual(values = c("darkred", "cornflowerblue")) +
+  stat_ellipse(aes(color = season, group = season), linewidth = 0.4, linetype = "dashed") +
+  scale_color_manual(values = c("darkred", "cornflowerblue"), guide = "none") +  # hide color legend
+  guides(
+    fill = guide_legend(
+      byrow = TRUE,
+      label.theme = element_text(size = 12, margin = margin(b = 8))
+    )
+  ) +
+  theme(
+    legend.title = element_text(size = 13),
+    legend.box = "vertical",
+    axis.title = element_text(size = 15),
+    axis.text = element_text(size = 15)
+  )
+
+
+ggsave(filename = "beta_select.s.svg", plot = dbrda.ss, device= "svg", width = 6.58, height = 3.60, units = "in", dpi = 300)
+
+````
+
+````{r}
+
+# Get sample names from the distance matrix
+sample_names.s <- attr(dist_selected.s, "Labels")
+
+sample_names.s
+
+# Subset ko_meta to keep only those rows
+ko_meta_subset.s <- ko_meta[rownames(ko_meta) %in% sample_names.s, ]
+
+# Reorder to match the distance matrix order
+ko_meta_subset.s <- ko_meta_subset.s[sample_names.s, ]
+
+adonis2(dist_selected.s ~ season, data = ko_meta_subset.s, permutations = 9999)
+
+
+adonis2(dist_selected ~ lifestyle, data = ko_meta, permutations = 9999)
+adonis2(dist_selected ~ ko_meta$lifestyle, permutations = 9999)
+
+
+`````
+
+#testing both (season + lifestyle)
+
+```{r}
+
+pathway_test <- c(
+  "Lipoic acid metabolism",
+  "Glycerolipid metabolism",
+  "Pentose and glucuronate interconversions",
+  "Cysteine and methionine metabolism",
+  "Ascorbate and aldarate metabolism",
+  "Necroptosis",
+  "Insect hormone biosynthesis",
+  "Thyroid hormone signaling pathway",
+  "Carotenoid biosynthesis",
+  "Cushing syndrome",
+  "Renal cell carcinoma",
+  "Penicillin and cephalosporin biosynthesis",
+  "Glyoxylate and dicarboxylate metabolism",
+  "Biofilm formation - Escherichia coli",
+  "Tuberculosis",
+  "Salmonella infection",
+  "Aminoacyl-tRNA biosynthesis",
+  "Pyrimidine metabolism",
+  "Purine metabolism",
+  "Carbon fixation by Calvin cycle",
+  "Fructose and mannose metabolism",
+  "DNA replication",
+  "Cell cycle - Caulobacter",
+  "Pentose phosphate pathway",
+  "Base excision repair",
+  "Pantothenate and CoA biosynthesis",
+  "Arginine biosynthesis",
+  "Biosynthesis of ansamycins",
+  "MAPK signaling pathway - plant",
+  "Protein processing in endoplasmic reticulum",
+  "N-Glycan biosynthesis",
+  "Longevity regulating pathway",
+  "Plant hormone signal transduction",
+  "MAPK signaling pathway - fly",
+  "Coronavirus disease - COVID-19",
+  "Biosynthesis of various antibiotics; Kanosamine biosynthesis, Aurachin biosynthesis, Bacilysin biosynthesis, Puromycin biosynthesis, Dapdiamides biosynthesis, Fosfomycin biosynthesis, Cremeomycin biosynthesis, Fumagillin biosynthesis, Pentalenolactone biosynthesis, Terpentecin biosynthesis, Roseoflavin biosynthesis, Cycloserine biosynthesis",
+  "Prolactin signaling pathway",
+  "Selenocompound metabolism",
+  "FoxO signaling pathway",
+  "African trypanosomiasis",
+  "Lipoarabinomannan (LAM) biosynthesis",
+  "Autophagy - yeast",
+  "Benzoate degradation",
+  "Steroid degradation",
+  "Nitrogen metabolism",
+  "Toluene degradation",
+  "Xylene degradation",
+  "Chlorocyclohexane and chlorobenzene degradation",
+  "Pathways in cancer",
+  "Prion disease",
+  "Non-alcoholic fatty liver disease",
+  "Amyotrophic lateral sclerosis",
+  "Pathways of neurodegeneration - multiple diseases",
+  "Thermogenesis",
+  "Huntington disease",
+  "Cardiac muscle contraction",
+  "Dioxin degradation",
+  "Adipocytokine signaling pathway",
+  "Efferocytosis",
+  "Shigellosis",
+  "Ferroptosis",
+  "Axon regeneration"
+)
+
+ko_filtereded <- merged_data_clean %>%
+  filter(Pathway_Name %in% pathway_test)
+
+ko_filtereded <- ko_filtereded %>%
+  select(-t1_rocks_summer)
+
+# First, get only abundance columns
+abundance_colsed <- grep("^t\\d+_", names(ko_filtereded), value = TRUE)
+
+# Then, sum by pathway
+pathway_abundanced <- ko_filtereded %>%
+  group_by(Pathway_Name) %>%
+  summarise(across(all_of(abundance_colsed), sum), .groups = "drop")
+
+
+# Set Pathway_Name as rownames and transpose
+pathway_matrixed <- as.data.frame(pathway_abundanced)
+rownames(pathway_matrixed) <- pathway_matrixed$Pathway_Name
+pathway_matrixed <- pathway_matrixed[ , -1]  # remove Pathway_Name column
+
+
+# Transpose, now we have the data matrix
+pathway_ted <- t(pathway_matrixed)
+
+
+
+selected_hellingered = decostand(pathway_ted, method = "hellinger")
+
+dist_selected.sed = vegdist(selected_hellingered, method = "bray")
+
+# Get sample names from the distance matrix
+sample_names.sed <- attr(dist_selected.sed, "Labels")
+
+sample_names.sed
+
+# Subset ko_meta to keep only those rows
+ko_meta_subset.sed <- ko_meta[rownames(ko_meta) %in% sample_names.sed, ]
+
+# Reorder to match the distance matrix order
+ko_meta_subset.sed <- ko_meta_subset.sed[sample_names.sed, ]
+
+adonis2(dist_selected.sed ~ lifestyle, data = ko_meta_subset.sed, permutations = 9999)
+
+
+adonis2(dist_selected.sed ~ season * lifestyle, 
+        data = ko_meta_subset.sed, 
+        permutations = 9999)
+
+adonis2(dist_selected.sed ~ season * lifestyle,
+        data = ko_meta_subset.sed,
+        permutations = 9999,
+        by = "margin")
+
+
+all(rownames(dist_selected.sed) == rownames(ko_meta_subset.sed))
+
+
+
+
+
+
+
+
+````
+
+
+
+
+
+
